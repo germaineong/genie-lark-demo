@@ -1,0 +1,43 @@
+resources:
+  apps:
+    lark_genie_bot:
+      name: ${var.app_name}
+      description: "Lark → Genie bot — answers each Lark user's questions under their own Databricks identity (per-user OBO)."
+
+      # Deploy root (contains app.yaml, requirements.txt, and the `app/` package).
+      source_code_path: ../src
+
+      # On-behalf-of user authorization: forward the signed-in user's token to the
+      # app (captured at /bind) and scope it to just what Genie needs. The iam.*
+      # identity scopes are implicit — the apps API rejects them as user_api_scopes.
+      forward_user_access_token: true
+      user_api_scopes:
+        - genie
+        - sql
+
+      # Pin a single instance: the OBO token map is in process memory and must not
+      # be split across replicas.
+      compute_min_instances: 1
+      compute_max_instances: 1
+
+      # Per-deployment values, surfaced to app.yaml via valueFrom (resource names must
+      # match the valueFrom keys there).
+      resources:
+        # The Genie space to answer from. Genie runs as each asking user (OBO), so the
+        # app's own service principal only needs to see it.
+        - name: "genie-space"
+          genie_space:
+            name: ${var.genie_space_name}
+            space_id: ${var.genie_space_id}
+            permission: "CAN_VIEW"
+        # Lark app credentials from a secret scope.
+        - name: "lark-app-id"
+          secret:
+            scope: ${var.secret_scope}
+            key: "lark_app_id"
+            permission: "READ"
+        - name: "lark-app-secret"
+          secret:
+            scope: ${var.secret_scope}
+            key: "lark_app_secret"
+            permission: "READ"

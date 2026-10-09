@@ -1,0 +1,5 @@
+lark-oapi==1.7.3
+databricks-sdk
+fastapi
+uvicorn
+requests

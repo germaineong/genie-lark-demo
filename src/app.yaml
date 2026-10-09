@@ -1,0 +1,23 @@
+# Databricks Apps config — the same file works in every workspace.
+# Deploy root = this dir (src/); the `app/` package and `uvicorn app.app:app` resolve
+# from here. Workspace-specific values come from the app's RESOURCES (bound per
+# deployment in resources/lark_bot.app.yml, or in the Apps UI) via valueFrom; the
+# app's public URL is discovered at runtime (see app/baseurl.py).
+command: ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+env:
+  - name: GENIE_SPACE_ID
+    valueFrom: "genie-space"
+  - name: LARK_APP_ID
+    valueFrom: "lark-app-id"
+  - name: LARK_APP_SECRET
+    valueFrom: "lark-app-secret"
+  - name: LARK_REGION
+    value: "intl"            # "intl" = larksuite.com; use "cn" for Feishu (feishu.cn)
+  - name: ENV
+    value: "prod"            # disables the local-dev DEV_USER_TOKEN fallback
+  # Optional:
+  # - name: BOT_TITLE        # card header (default "Genie 数据分析助手")
+  #   value: "Acme 数据分析助手"
+  # - name: APP_BASE_URL     # only if the app can't discover its own URL in your setup
+  #   value: "https://<app-url>"

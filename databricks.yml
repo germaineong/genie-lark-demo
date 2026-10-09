@@ -1,0 +1,25 @@
+bundle:
+  name: lark-genie-bot
+
+include:
+  - resources/*.yml
+
+variables:
+  genie_space_id:
+    description: ID of the Genie space the bot answers from (the <ID> in its URL /genie/rooms/<ID>).
+  genie_space_name:
+    description: Display label for the Genie space resource on the app.
+    default: Genie space
+  app_name:
+    description: Name of the Databricks App (lowercase letters, numbers, hyphens; unique per workspace).
+    default: lark-genie-bot
+  secret_scope:
+    description: Secret scope holding the Lark app credentials (keys lark_app_id and lark_app_secret).
+    default: lark_bot
+
+# No workspace is pinned here: choose one with --profile (or DATABRICKS_CONFIG_PROFILE /
+# DATABRICKS_HOST). Set per-environment variable values in the git-ignored
+# .databricks/bundle/<target>/variable-overrides.json, with --var, or BUNDLE_VAR_<name>.
+targets:
+  dev:
+    default: true
