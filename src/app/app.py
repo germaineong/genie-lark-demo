@@ -76,7 +76,9 @@ def bind(request: Request, open_id: str):
         return HTMLResponse(
             "<html><body style='font-family:sans-serif;max-width:40em;margin:3em auto'>"
             "<h1>无法绑定</h1><p>请在<b>已登录 Databricks 的浏览器</b>中打开此链接"
-            "（从机器人发来的整段链接复制）。</p></body></html>",
+            "（从机器人发来的整段链接复制）。</p>"
+            "<p>如果已经登录仍看到此页，说明本应用没有开启用户授权：请管理员检查应用的 "
+            "<code>user_api_scopes</code>，以及工作区是否允许应用使用这些 scope。</p></body></html>",
             status_code=400,
         )
 

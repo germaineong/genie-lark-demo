@@ -194,14 +194,61 @@ def test_empty_text_prompts():
     assert r.texts and not r.cards
 
 
-def test_is_auth_error_only_on_real_auth_errors():
-    class PermissionDenied(Exception):
-        pass
+class PermissionDenied(Exception):
+    """Stands in for databricks.sdk.errors.PermissionDenied (matched by class name)."""
 
+
+class Unauthenticated(Exception):
+    """Stands in for databricks.sdk.errors.Unauthenticated."""
+
+
+def test_is_auth_error_only_on_real_auth_errors():
     assert bot._is_auth_error(bot._AuthError("x")) is True
     assert bot._is_auth_error(genie_agent.AgentAuthError("401")) is True
-    assert bot._is_auth_error(PermissionDenied("nope")) is True
+    assert bot._is_auth_error(Unauthenticated("expired")) is True
+    assert bot._is_auth_error(PermissionDenied("nope")) is False  # a 403 is missing access, not an expired login
     assert bot._is_auth_error(ValueError("row 403 of 500")) is False  # digit substring must not false-positive
+
+
+def _chat_raising(exc, calls=None):
+    def chat(client, space_id, question, conversation_id=None):
+        if calls is not None:
+            calls.append(conversation_id)
+        raise exc
+    return chat
+
+
+def test_permission_denied_keeps_the_token_and_says_what_access_is_missing(monkeypatch):
+    _bound()
+    monkeypatch.setenv("GENIE_MODE", "chat")
+    monkeypatch.setattr(bot.genie, "ask_genie_chat",
+                        _chat_raising(PermissionDenied("User does not have CAN RUN on this space")))
+    r = Replies()
+    bot.route("ou", "q", r, client_factory=lambda tok: object())
+    assert tokens.get("ou") is not None  # re-binding wouldn't help, so don't make them
+    assert not any("/bind?open_id=" in t or "重新绑定" in t for t in r.texts)
+    assert any("CAN RUN" in t and "SELECT" in t for t in r.texts)
+
+
+def test_permission_denied_is_not_retried_in_a_new_conversation(monkeypatch):
+    _bound()
+    monkeypatch.setenv("GENIE_MODE", "chat")
+    conversations.put("ou", "old-conv", "chat")
+    calls = []
+    monkeypatch.setattr(bot.genie, "ask_genie_chat", _chat_raising(PermissionDenied("no access"), calls))
+    bot.route("ou", "q", Replies(), client_factory=lambda tok: object())
+    assert calls == ["old-conv"]  # a fresh conversation would be refused the same way
+
+
+def test_permission_denied_for_a_missing_scope_asks_to_sign_out_and_rebind(monkeypatch):
+    _bound()
+    monkeypatch.setenv("GENIE_MODE", "chat")
+    monkeypatch.setattr(bot.genie, "ask_genie_chat",
+                        _chat_raising(PermissionDenied("Invalid scope, required scopes: genie")))
+    r = Replies()
+    bot.route("ou", "q", r, client_factory=lambda tok: object())
+    assert tokens.get("ou") is None  # that token can never work
+    assert any(".auth/sign_out" in t and "绑定" in t for t in r.texts)
 
 
 def test_unbound_without_a_known_app_url_explains_setup(monkeypatch):

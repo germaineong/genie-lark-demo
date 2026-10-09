@@ -49,7 +49,28 @@ def test_no_workspace_specific_literals_in_deployable_files():
 
 def test_setup_notebook_mirrors_the_bundle_app():
     nb = (ROOT / "deploy" / "setup_target_workspace.py").read_text()
-    for needle in ('"genie"', '"sql"', 'name="genie-space"', 'name="lark-app-id"',
-                   'name="lark-app-secret"', "compute_min_instances=1", "compute_max_instances=1",
-                   "forward_user_access_token=True"):
+    for needle in ('"genie"', '"sql"', 'name="genie-space"', 'name="lark-app-id"', 'name="lark-app-secret"'):
         assert needle in nb, needle
+
+
+# Private Preview app fields (per the CLI's bundle schema). A workspace without those
+# previews may reject them, and the notebook's SDK may not know them (serverless
+# environment 6 ships databricks-sdk 0.122; forward_user_access_token needs 0.126).
+# user_api_scopes alone forwards the user's token, and an app runs one instance by default.
+_PRIVATE_PREVIEW = ("forward_user_access_token", "compute_min_instances", "compute_max_instances")
+
+
+def test_app_config_uses_no_private_preview_fields():
+    app = _load("resources/lark_bot.app.yml")["resources"]["apps"]["lark_genie_bot"]
+    nb = (ROOT / "deploy" / "setup_target_workspace.py").read_text()
+    for field in _PRIVATE_PREVIEW:
+        assert field not in app, field
+        assert field not in nb, field
+
+
+def test_setup_notebook_keeps_the_lark_secret_out_of_the_file():
+    # The notebook lives in a Git folder: a value typed into its source is one commit away
+    # from being pushed. Widget values aren't saved in the source file.
+    nb = (ROOT / "deploy" / "setup_target_workspace.py").read_text()
+    assert not re.search(r"^LARK_APP_SECRET\s*=\s*[\"']", nb, re.M)
+    assert 'dbutils.widgets.get("lark_app_secret")' in nb

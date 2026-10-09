@@ -85,14 +85,22 @@ C ─┘        └▶ Genie as the SP ─▶ same data     (each user binds onc
 - **Audit & trust:** query history names the real user, not an anonymous SP; the generated SQL is attributable (and shown on the card).
 - **Cost:** per-user identity uses each named user's Genie allowance instead of SP billing.
 - **The price:** more moving parts — a one-time bind (and re-bind after ~1h / app restart, since tokens live only in memory), a hard single-instance ceiling, compute billing while the app runs, and the OBO token lifecycle to manage.
-- **Beyond a demo:** a custom OAuth app with `offline_access` (bind *once*) + a persistent encrypted token store (survives restarts, unlocks >1 instance) — see the spec's "Approach B".
+- **Beyond a demo:** a custom OAuth app with `offline_access` (bind *once*) + a persistent encrypted token store (survives restarts, unlocks >1 instance). That isn't built here.
 
 ## Set up the Lark bot
 
-This is a one-time step in the Lark developer console, by someone who can manage apps in
+This is a one-time setup in the Lark developer console, by someone who can manage apps in
 your Lark tenant: [open.larksuite.com/app](https://open.larksuite.com/app) for Lark, or
-[open.feishu.cn/app](https://open.feishu.cn/app) for Feishu (then set `LARK_REGION: cn`).
-Menu names are given in English and Chinese.
+[open.feishu.cn/app](https://open.feishu.cn/app) for Feishu. Menu names are given in
+English and Chinese.
+
+**Order:** do steps 1–4 here, then deploy the app
+([with the CLI](#deploy-with-the-databricks-cli) or [without](#deploy-without-the-cli)),
+then come back for steps 5–6. Lark only saves the long-connection setting in step 5
+while the app is connected.
+
+**Feishu:** before you deploy, change `LARK_REGION` from `"intl"` to `"cn"` in
+`src/app.yaml`. It's the only file you may need to edit.
 
 1. **Create a custom app** (企业自建应用). Its name and icon are what people see in Lark,
    e.g. "Genie 数据分析助手".
@@ -117,12 +125,11 @@ Menu names are given in English and Chinese.
 
 4. **Copy the credentials:** Credentials & Basic Info (凭证与基础信息) → **App ID** and
    **App Secret**. They go into a Databricks secret scope when you deploy.
-5. **Receive messages over a long connection:** Events & Callbacks (事件与回调) → Event
-   configuration.
+5. **Receive messages over a long connection** (once the app is deployed and running):
+   Events & Callbacks (事件与回调) → Event configuration.
    - Subscription mode: **Receive events through persistent connection** (使用长连接接收事件).
-     There's no URL to fill in: the app connects out to Lark. If Lark won't save the setting
-     because no connection is detected, deploy the app first (deploy steps 1–3, either
-     path); it connects as soon as it starts.
+     There's no URL to fill in: the app connects out to Lark, and Lark only saves this
+     setting while that connection is live.
    - **Add event:** **Receive messages** (接收消息, `im.message.receive_v1`). The DM scope
      from step 3 is what lets this event reach the bot.
 6. **Publish:** Version Management & Release (版本管理与发布) → create a version, set
@@ -136,22 +143,31 @@ Menu names are given in English and Chinese.
 
 ### Prerequisites
 
-- **Databricks CLI** (≥ 1.0) authenticated to the target workspace, e.g.
+- **Databricks CLI** (tested with v1.17.0) authenticated to the target workspace, e.g.
   `databricks auth login --host <workspace-url> --profile <profile>`.
 - A **Genie space** (now called a *Genie Agent*) to answer from. You need **CAN MANAGE**
   on it: the deploy binds it to the app as a resource.
-- A **Lark/Feishu bot**, set up as in [Set up the Lark bot](#set-up-the-lark-bot).
+- A **Lark/Feishu bot**, set up as in [Set up the Lark bot](#set-up-the-lark-bot) (steps
+  1–4 before you deploy).
+- **Apps may use the `genie` and `sql` scopes.** Workspace admins can restrict them under
+  Settings → Development → Apps → *Restrict OAuth scopes for apps to selected values*
+  (default: all APIs). If either scope isn't allowed, the app can't be deployed or started.
+- **Outbound network access** from the app to Lark (`*.larksuite.com`, or `*.feishu.cn`)
+  and to PyPI, which installs `src/requirements.txt`. This only matters if your workspace
+  restricts serverless egress with network policies.
 - Every Lark user who'll ask questions needs a **Databricks login** in the workspace
   (OBO runs as them).
-- **One deployment per Lark bot.** A Lark bot allows one WebSocket connection; if two
-  deployments share a bot, messages are split between them. Use a separate Lark app
-  per environment, or stop the other deployment.
+- **One deployment per Lark bot.** If two deployments connect with the same Lark app,
+  Lark delivers each message to only one of them. Use a separate Lark app per
+  environment, or stop the other deployment.
 
 ### 1. Store the Lark credentials in a secret scope
 
+Each `put-secret` prompts for its value: paste the App ID, then the App Secret.
+
 ```bash
 databricks secrets create-scope lark_bot --profile <profile>
-databricks secrets put-secret lark_bot lark_app_id --profile <profile>       # prompts for the value
+databricks secrets put-secret lark_bot lark_app_id --profile <profile>
 databricks secrets put-secret lark_bot lark_app_secret --profile <profile>
 ```
 
@@ -185,14 +201,18 @@ Apps API (see [How the app finds its URL](#how-the-app-finds-its-url)).
 
 - **The app:** **CAN USE** for the people (or a group) who'll use the bot — they open
   the bind page through it (app page → **Permissions**).
-- **The data:** **CAN RUN** on the Genie space, `SELECT` on its tables, and **CAN USE**
-  on its SQL warehouse. Genie runs as each user, so this is what gates their data.
+- **The data:** **CAN RUN** on the Genie space; `USE CATALOG` and `USE SCHEMA` on its
+  catalog and schema plus `SELECT` on its tables; and **CAN USE** on its SQL warehouse.
+  Genie runs as each user, so this is what gates their data.
+
+Then finish the Lark setup: [steps 5–6](#set-up-the-lark-bot) (long connection and publish).
 
 ### 5. Use it
 
 In Lark, search for the bot by name and DM it **`绑定`** → open the link in a browser
-that's logged in to the workspace → you'll see **绑定成功**. Then ask a data question; the answer runs under
-your identity. Re-bind after ~1 h or an app restart.
+that's logged in to the workspace → you'll see **绑定成功**. The first time, Databricks may
+ask you to allow the app to act on your behalf; that's expected. Then ask a data
+question; the answer runs under your identity. Re-bind after ~1 h or an app restart.
 
 A status card shows progress while Genie works (Agent mode takes ~30 s to a few
 minutes), then the answer arrives as one or more cards: Genie's report with its tables and charts, the SQL
@@ -233,8 +253,12 @@ creates the secret scope and, optionally, the app.
 | `DISABLE_WS` / `DEV_USER_TOKEN` | local dev only | Skip the WS thread / inject a token at `/bind` locally |
 
 OBO scopes are declared on the **app resource** (`resources/lark_bot.app.yml`), not in
-`app.yaml`: `user_api_scopes: [genie, sql]` with `forward_user_access_token: true`.
-(`genie` covers Agent mode; the older `dashboards.genie` is deprecated and maps to it.)
+`app.yaml`: `user_api_scopes: [genie, sql]`. With user scopes set, Databricks forwards
+each signed-in user's token to the app; nothing else is needed. (`genie` covers Agent
+mode; the older `dashboards.genie` is deprecated and maps to it.)
+
+The app must stay at **one instance**, the default: the token map lives in memory. Don't
+turn on horizontal scaling.
 
 ### How the app finds its URL
 
@@ -261,7 +285,7 @@ broken link.
 genie-lark-demo/
 ├── databricks.yml                 # DABs bundle: variables + a `dev` target (no workspace pinned)
 ├── resources/
-│   └── lark_bot.app.yml           # the Databricks App resource (OBO scopes, Genie space + secrets, 1 instance)
+│   └── lark_bot.app.yml           # the Databricks App resource (OBO scopes, Genie space + secrets)
 ├── src/                           # ← deploy root (app.yaml + requirements + the app/ package)
 │   ├── app.yaml                   # uvicorn command + env (valueFrom resources; same in every workspace)
 │   ├── requirements.txt
@@ -278,6 +302,9 @@ genie-lark-demo/
 
 ## Local development
 
+Needs Python 3.10 or newer. macOS's built-in `python3` may be older; if so, use e.g.
+`python3.12` in the first command.
+
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -r src/requirements.txt pytest httpx pyyaml
@@ -293,10 +320,28 @@ For local `/bind` exercises, set `DEV_USER_TOKEN` (ignored once `ENV=prod`) and
 ## Operations
 
 ```bash
-databricks apps get  <app_name> --profile <profile>     # state (RUNNING) + url
-databricks apps logs <app_name> --profile <profile>     # startup "bind links: …", WS connect, errors (OAuth profile)
-databricks apps stop <app_name> --profile <profile>     # stop compute (it bills while running)
+databricks apps get  <app_name> --profile <profile>
+databricks apps logs <app_name> --profile <profile>
+databricks apps stop <app_name> --profile <profile>
 ```
+
+- `get` shows the app's state (RUNNING) and URL.
+- `logs` shows the startup line `bind links: …`, the Lark connection
+  (`connected to wss://…`), and any errors. It needs an OAuth-authenticated profile.
+- `stop` stops the app's compute, which bills while it runs.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| The bot never replies | The logs should show `bind links: …` and `connected to wss://…`. If it never connects, check the App ID and Secret in the secret scope, and `LARK_REGION`. If it connects but gets no messages, check that the released Lark version has the **Receive messages** event and persistent connection (Lark steps 5–6), and that no other deployment uses the same Lark app. |
+| 「机器人尚未就绪…」 | The app doesn't know its URL yet: open the app URL once in a browser, or set `APP_BASE_URL`. |
+| The bind link shows 无法绑定 | Open it in a browser that's signed in to the workspace. If you are signed in, the app has no user-authorization scopes: check `user_api_scopes` and the admin restriction in [Prerequisites](#prerequisites). |
+| 「登录已过期，请重新绑定」 | The ~1 h login expired or the app restarted: send `绑定` again. |
+| 「你没有访问这个 Genie 空间或其数据的权限」 | Give that user the access in [step 4](#4-give-people-access). |
+| 「改用快速问答模式…」 with a sign-out link | The browser kept an older app login without the `genie` scope: open `<app-url>/.auth/sign_out`, then send `绑定`. |
+| Charts arrive as simpler Lark charts, or as 「请在 Genie 中查看」 | Add `im:resource` (Tenant token) in Lark and release a new version. It can take a while to apply. |
+| Deploy or start fails over scopes | An admin restricts app scopes: allow `genie` and `sql` (see [Prerequisites](#prerequisites)). |
 
 ## Security notes
 

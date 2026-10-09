@@ -7,18 +7,16 @@ resources:
       # Deploy root (contains app.yaml, requirements.txt, and the `app/` package).
       source_code_path: ../src
 
-      # On-behalf-of user authorization: forward the signed-in user's token to the
-      # app (captured at /bind) and scope it to just what Genie needs. The iam.*
-      # identity scopes are implicit — the apps API rejects them as user_api_scopes.
-      forward_user_access_token: true
+      # On-behalf-of user authorization: with user scopes set, Databricks forwards the
+      # signed-in user's token to the app (captured at /bind), scoped to just what
+      # Genie needs. The iam.* identity scopes are implicit — the apps API rejects them
+      # as user_api_scopes.
       user_api_scopes:
         - genie
         - sql
 
-      # Pin a single instance: the OBO token map is in process memory and must not
-      # be split across replicas.
-      compute_min_instances: 1
-      compute_max_instances: 1
+      # The app must run as ONE instance (the default): the OBO token map is in process
+      # memory and must not be split across replicas. Don't enable horizontal scaling.
 
       # Per-deployment values, surfaced to app.yaml via valueFrom (resource names must
       # match the valueFrom keys there).

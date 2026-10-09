@@ -28,6 +28,12 @@ def test_bind_missing_token_is_400():
     assert tokens.get("ouY") is None
 
 
+def test_bind_missing_token_page_names_the_setup_cause_too():
+    # Signed in but still no token means the app has no user-authorization scopes.
+    r = c.get("/bind?open_id=ouY")
+    assert "user_api_scopes" in r.text
+
+
 def test_bind_escapes_email_in_html():
     tokens.drop("ouE")
     r = c.get("/bind?open_id=ouE",

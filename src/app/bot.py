@@ -23,6 +23,9 @@ NEW_CHAT_COMMANDS = {"新对话", "重新开始", "new", "/new", "reset"}
 _NOT_READY = ("机器人尚未就绪：还不知道本应用的访问地址。请管理员在浏览器中打开一次本应用，"
               "或在 app.yaml 中设置 APP_BASE_URL。")
 _BUSY = "上一个问题还在分析中，请稍候…"
+_NO_ACCESS = ("你没有访问这个 Genie 空间或其数据的权限。请联系管理员授予：Genie 空间的 CAN RUN 权限，"
+              "数据所在 catalog 和 schema 的 USE CATALOG / USE SCHEMA 权限及表的 SELECT 权限，"
+              "以及 SQL 仓库的 CAN USE 权限。")
 _PROGRESS_MIN_S = 2  # don't edit the progress card more often than this
 _MAX_CHARTS = 8
 
@@ -52,15 +55,24 @@ def _mode() -> str:
 
 
 class _AuthError(Exception):
-    """Token rejected by Databricks (401/403) — the user must re-bind."""
+    """Token rejected by Databricks (401) — the user must re-bind."""
 
 
 def _is_auth_error(exc: Exception) -> bool:
+    """An expired or invalid login (401): re-binding fixes it."""
     if isinstance(exc, (_AuthError, genie_agent.AgentAuthError)):
         return True
-    if type(exc).__name__ in ("PermissionDenied", "Unauthenticated"):  # databricks.sdk.errors
+    if type(exc).__name__ == "Unauthenticated":  # databricks.sdk.errors
         return True
-    return str(getattr(exc, "error_code", "")) in ("PERMISSION_DENIED", "UNAUTHENTICATED")
+    return str(getattr(exc, "error_code", "")) == "UNAUTHENTICATED"
+
+
+def _is_permission_error(exc: Exception) -> bool:
+    """Databricks refused the call (403): the user lacks access, or their token lacks a
+    scope. Re-binding the same login doesn't fix a missing grant."""
+    if type(exc).__name__ == "PermissionDenied":  # databricks.sdk.errors
+        return True
+    return str(getattr(exc, "error_code", "")) == "PERMISSION_DENIED"
 
 
 def bind_url(open_id: str):
@@ -123,6 +135,13 @@ def route(open_id: str, text: str, replies, client_factory=_default_client_facto
             print(f"[bot] token rejected, asking to re-bind: {e}", flush=True)
             tokens.drop(open_id)
             replies.text(_with_bind_link("登录已过期，请重新绑定：", open_id))
+        elif _is_permission_error(e):
+            print(f"[bot] permission denied: {e}", flush=True)
+            if "scope" in str(e).lower():
+                tokens.drop(open_id)  # this token can never work; a fresh consent can
+                replies.text(_sign_out_and_rebind())
+            else:
+                replies.text(_NO_ACCESS)
         elif isinstance(e, genie_agent.AgentBusy):
             replies.text(_BUSY)
         elif isinstance(e, genie_agent.AgentRateLimited):
@@ -154,10 +173,18 @@ def _answer(open_id: str, text: str, replies, client) -> None:
     _answer_chat(open_id, text, replies, client, space_id)
 
 
+def _sign_out_url() -> str:
+    return f"{baseurl.base_url() or ''}/.auth/sign_out"
+
+
 def _scope_hint() -> str:
-    sign_out = f"{baseurl.base_url() or ''}/.auth/sign_out"
     return ("提示：你当前的 Databricks 授权缺少 genie 权限，深度分析（Agent 模式）暂时无法使用，已改用快速问答。"
-            f"请在浏览器中打开 {sign_out} 退出本应用（并关闭它的其他标签页），然后发送「绑定」重新授权。")
+            f"请在浏览器中打开 {_sign_out_url()} 退出本应用（并关闭它的其他标签页），然后发送「绑定」重新授权。")
+
+
+def _sign_out_and_rebind() -> str:
+    return ("你当前的 Databricks 授权缺少本应用需要的权限。请在浏览器中打开 "
+            f"{_sign_out_url()} 退出本应用（并关闭它的其他标签页），然后发送「绑定」重新授权。")
 
 
 def _answer_agent(open_id: str, text: str, replies, client, space_id: str) -> None:
@@ -213,7 +240,7 @@ def _answer_chat(open_id: str, text: str, replies, client, space_id: str) -> Non
     try:
         card, conversation_id = genie.ask_genie_chat(client, space_id, text, conversation_id=previous)
     except Exception as e:  # noqa: BLE001 — a stale conversation shouldn't block a fresh ask
-        if not previous or _is_auth_error(e):
+        if not previous or _is_auth_error(e) or _is_permission_error(e):
             raise
         conversations.drop(open_id)
         card, conversation_id = genie.ask_genie_chat(client, space_id, text)
